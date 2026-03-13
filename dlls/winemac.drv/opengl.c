@@ -2160,22 +2160,19 @@ static BOOL macdrv_context_create(int format, void *shared, const int *attrib_li
     }
 
 
-    if ((major == 3 && (minor == 2 || minor == 3)) ||
+    if (major == 3 && (minor == 0 || minor == 1))
+    {
+        WARN("Upgrading GL version to 3.2\n");
+        minor = 2;
+    }
+
+    if (major == 3 ||
         (major == 4 && (minor == 0 || minor == 1)))
     {
-        /* CW Hack 24834 */
-        const char *fwd_compat_context = getenv("CX_FWD_COMPAT_GL_CTX");
-        if (fwd_compat_context && fwd_compat_context[0] == '1')
-        {
-            if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
-                flags |= WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
-        }
-
         if (!(flags & WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB))
         {
-            WARN("OS X only supports forward-compatible 3.2+ contexts\n");
-            RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
-            return FALSE;
+            WARN("Forcing forward-compatible context\n");
+            flags |= WGL_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB;
         }
         if (profile != WGL_CONTEXT_CORE_PROFILE_BIT_ARB)
         {
@@ -2192,12 +2189,6 @@ static BOOL macdrv_context_create(int format, void *shared, const int *attrib_li
             return FALSE;
         }
         core = TRUE;
-    }
-    else if (major >= 3)
-    {
-        WARN("Profile version %u.%u not supported\n", major, minor);
-        RtlSetLastWin32Error(ERROR_INVALID_VERSION_ARB);
-        return FALSE;
     }
     else if (major < 1 || (major == 1 && (minor < 0 || minor > 5)) ||
              (major == 2 && (minor < 0 || minor > 1)))
