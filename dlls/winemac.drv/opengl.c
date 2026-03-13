@@ -2559,13 +2559,29 @@ static BOOL macdrv_pbuffer_updated(HDC hdc, struct opengl_drawable *base, GLenum
 #define BCDEC_STATIC
 #include "opengl_bcdec.h"
 
+static void (*pglCompressedTexImage2D)(GLenum target, GLint level, GLenum internalformat,
+                                       GLsizei width, GLsizei height, GLint border,
+                                       GLsizei imageSize, const void *data);
+
 static void (*pglCompressedTexImage3D)(GLenum target, GLint level, GLenum internalformat,
                                        GLsizei width, GLsizei height, GLsizei depth, GLint border,
                                        GLsizei imageSize, const void *data);
 
+static void (*pglCompressedTexSubImage2D)(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                          GLsizei width, GLsizei height, GLenum format,
+                                          GLsizei imageSize, const void *data);
+
 static void (*pglCompressedTexSubImage3D)(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                                           GLint zoffset, GLsizei width, GLsizei height, GLsizei depth,
                                           GLenum format, GLsizei imageSize, const void *data);
+
+static void (*pglTexImage2D)(GLenum target, GLint level, GLint internalformat, GLsizei width,
+                              GLsizei height, GLint border, GLenum format, GLenum type,
+                              const void *pixels);
+
+static void (*pglTexSubImage2D)(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                 GLsizei width, GLsizei height, GLenum format, GLenum type,
+                                 const void *pixels);
 
 static void *decode_bptc_unorm_to_rgba(const void *data, GLsizei width, GLsizei height, GLsizei depth)
 {
@@ -2601,6 +2617,40 @@ static void *decode_bptc_unorm_to_rgba(const void *data, GLsizei width, GLsizei 
     }
 
     return pixels;
+}
+
+static void macdrv_glCompressedTexImage2D(GLenum target, GLint level, GLenum internalformat,
+                                          GLsizei width, GLsizei height, GLint border,
+                                          GLsizei imageSize, const void *data)
+{
+    if ((internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ||
+         internalformat == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) &&
+        (target == GL_TEXTURE_2D || target == GL_PROXY_TEXTURE_2D))
+    {
+        char *rawdata = decode_bptc_unorm_to_rgba(data, width, height, 1);
+        pglTexImage2D(target, level, (internalformat == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ? GL_SRGB8_ALPHA8 : GL_RGBA8), width, height, border, GL_RGBA, GL_UNSIGNED_BYTE, rawdata);
+        if (rawdata)
+            free(rawdata);
+    }
+    else
+        pglCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, data);
+}
+
+static void macdrv_glCompressedTexSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
+                                             GLsizei width, GLsizei height, GLenum format,
+                                             GLsizei imageSize, const void *data)
+{
+    if ((format == GL_COMPRESSED_SRGB_ALPHA_BPTC_UNORM_ARB ||
+         format == GL_COMPRESSED_RGBA_BPTC_UNORM_ARB) &&
+        target == GL_TEXTURE_2D)
+    {
+        char *pixels = decode_bptc_unorm_to_rgba(data, width, height, 1);
+        pglTexSubImage2D(target, level, xoffset, yoffset, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+        if (pixels)
+            free(pixels);
+    }
+    else
+        pglCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, imageSize, data);
 }
 
 static void macdrv_glCompressedTexImage3D(GLenum target, GLint level, GLenum internalformat,
@@ -2730,8 +2780,12 @@ UINT macdrv_OpenGLInit(UINT version, const struct opengl_funcs *opengl_funcs, co
     LOAD_FUNCPTR(glTexImage3D);
     LOAD_FUNCPTR(glTexSubImage3D);
     /* CX HACK 23422 */
+    LOAD_FUNCPTR(glCompressedTexImage2D);
     LOAD_FUNCPTR(glCompressedTexImage3D);
+    LOAD_FUNCPTR(glCompressedTexSubImage2D);
     LOAD_FUNCPTR(glCompressedTexSubImage3D);
+    LOAD_FUNCPTR(glTexImage2D);
+    LOAD_FUNCPTR(glTexSubImage2D);
 
     if (!init_gl_info())
         goto failed;
@@ -2858,8 +2912,14 @@ static void *macdrv_get_proc_address(const char *name)
     /* redirect some OpenGL extension functions */
     if (!strcmp(name, "glCopyColorTable")) return macdrv_glCopyColorTable;
     /* CX HACK 23422 */
+    if (!strcmp(name, "glCompressedTexImage2D")) return macdrv_glCompressedTexImage2D;
+    if (!strcmp(name, "glCompressedTexImage2DARB")) return macdrv_glCompressedTexImage2D;
     if (!strcmp(name, "glCompressedTexImage3D")) return macdrv_glCompressedTexImage3D;
+    if (!strcmp(name, "glCompressedTexImage3DARB")) return macdrv_glCompressedTexImage3D;
+    if (!strcmp(name, "glCompressedTexSubImage2D")) return macdrv_glCompressedTexSubImage2D;
+    if (!strcmp(name, "glCompressedTexSubImage2DARB")) return macdrv_glCompressedTexSubImage2D;
     if (!strcmp(name, "glCompressedTexSubImage3D")) return macdrv_glCompressedTexSubImage3D;
+    if (!strcmp(name, "glCompressedTexSubImage3DARB")) return macdrv_glCompressedTexSubImage3D;
     return dlsym(opengl_handle, name);
 }
 
