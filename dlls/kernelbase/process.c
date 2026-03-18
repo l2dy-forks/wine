@@ -545,6 +545,28 @@ BOOL WINAPI DECLSPEC_HOTPATCH CreateProcessInternalW( HANDLE token, const WCHAR 
         app_name = name;
     }
 
+    /* HACK: Inject --in-process-gpu into the main steamwebhelper process to work
+     * around Chromium multi-process GPU conflicting with Wine's process-local
+     * window data. Only the main process (no --type= argument) needs it. */
+    if (wcsstr(app_name, L"steamwebhelper.exe") && !wcsstr(tidy_cmdline, L"--type="))
+    {
+        LPWSTR new_command_line;
+
+        new_command_line = RtlAllocateHeap(GetProcessHeap(), 0,
+                sizeof(WCHAR) * (lstrlenW(tidy_cmdline) + 20));
+
+        if (new_command_line)
+        {
+            wcscpy(new_command_line, tidy_cmdline);
+            lstrcatW(new_command_line, L" --in-process-gpu");
+
+            TRACE("hack changing command line to %s\n", debugstr_w(new_command_line));
+
+            if (tidy_cmdline != cmd_line) RtlFreeHeap( GetProcessHeap(), 0, tidy_cmdline );
+            tidy_cmdline = new_command_line;
+        }
+    }
+
     /* CW Hack 24938 */
     if (cmd_line && wcsstr(cmd_line, L"EpicGamesLauncher.exe"))
     {
